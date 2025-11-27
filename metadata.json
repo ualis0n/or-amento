@@ -1,0 +1,5 @@
+{
+  "name": "Orçamentos WA",
+  "description": "Aplicativo para geração de orçamentos profissionais em PDF com integração para WhatsApp.",
+  "requestFramePermissions": []
+}
