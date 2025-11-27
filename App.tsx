@@ -30,7 +30,9 @@ import {
   LayoutDashboard,
   History,
   Settings,
-  ArrowLeft
+  ArrowLeft,
+  CheckSquare,
+  Square
 } from 'lucide-react';
 
 // --- CONSTANTS & DEFAULTS ---
@@ -245,14 +247,20 @@ export default function App() {
     if (savedUser) setCurrentUser(savedUser);
   }, []);
 
-  // Load User Data
+  // Load User Data & Auto Save Company
   useEffect(() => {
     if (currentUser) {
-      const savedCompany = db.getCompany(currentUser);
-      if (savedCompany) setCompany(savedCompany);
+      // First load
+      if (company === DEFAULT_COMPANY_TEMPLATE) {
+          const savedCompany = db.getCompany(currentUser);
+          if (savedCompany) setCompany(savedCompany);
+      } else {
+          // Auto save on change
+          db.saveCompany(currentUser, company);
+      }
       setCatalogList(db.getCatalog(currentUser));
     }
-  }, [currentUser, view]);
+  }, [currentUser, view, company]); // Add company to dependencies for auto-save
 
   const handleLogin = (email: string) => {
     localStorage.setItem('saas_current_user', email);
@@ -299,7 +307,7 @@ export default function App() {
 
     // Se estiver indo para a prévia (passo 4)
     if (step === Step.ITEMS) {
-        // SALVAR DADOS DA EMPRESA
+        // SALVAR DADOS DA EMPRESA (Garantia extra)
         if (currentUser) db.saveCompany(currentUser, company);
         
         // SALVAR ORÇAMENTO NO HISTÓRICO AUTOMATICAMENTE
@@ -361,21 +369,36 @@ export default function App() {
              </div>
           </button>
 
-          <button onClick={() => {
-              const data = db.exportData(currentUser!);
-              const blob = new Blob([data], {type: 'application/json'});
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement('a');
-              a.href = url;
-              a.download = `backup_${formatDate(new Date())}.json`;
-              a.click();
-          }} className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex items-center gap-4 hover:bg-gray-50">
-             <div className="bg-orange-100 p-3 rounded-full text-orange-700"><Save size={24} /></div>
-             <div className="text-left">
-                <h4 className="font-bold">Fazer Backup</h4>
-                <p className="text-xs text-gray-500">Baixar dados do sistema</p>
-             </div>
-          </button>
+          <div className="grid grid-cols-2 gap-2">
+            <button onClick={() => {
+                const data = db.exportData(currentUser!);
+                const blob = new Blob([data], {type: 'application/json'});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `backup_${formatDate(new Date())}.json`;
+                a.click();
+            }} className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex flex-col items-center justify-center hover:bg-gray-50 text-center">
+              <Save size={24} className="text-orange-600 mb-2"/>
+              <p className="text-xs font-bold text-gray-600">Baixar Backup</p>
+            </button>
+            <div className="relative bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex flex-col items-center justify-center hover:bg-gray-50 text-center">
+              <Download size={24} className="text-blue-600 mb-2"/>
+              <p className="text-xs font-bold text-gray-600">Restaurar</p>
+              <input type="file" className="absolute inset-0 opacity-0 cursor-pointer" accept=".json" onChange={async (e) => {
+                 const file = e.target.files?.[0];
+                 if(file) {
+                    const text = await file.text();
+                    if(db.importData(currentUser!, text)) {
+                        alert("Dados restaurados com sucesso! A página será recarregada.");
+                        window.location.reload();
+                    } else {
+                        alert("Arquivo inválido.");
+                    }
+                 }
+              }}/>
+            </div>
+          </div>
        </div>
     </div>
   );
@@ -487,6 +510,7 @@ export default function App() {
                currentUser={currentUser!}
                setIsCatalogOpen={setIsCatalogOpen}
                catalogList={catalogList}
+               setCatalogList={setCatalogList}
            />}
         </div>
 
@@ -624,7 +648,23 @@ const CompanyStep = ({company, setCompany, createdBy, setCreatedBy}: any) => {
         const file = e.target.files[0];
         if(file) {
             const reader = new FileReader();
-            reader.onloadend = () => setCompany({...company, logo: reader.result});
+            reader.onloadend = () => {
+                const img = new Image();
+                img.src = reader.result as string;
+                img.onload = () => {
+                   // Compress Image Logic would go here in utils but keeping simple
+                   // Simulating compression by drawing to canvas
+                   const canvas = document.createElement('canvas');
+                   const MAX_WIDTH = 300;
+                   const scaleSize = MAX_WIDTH / img.width;
+                   canvas.width = MAX_WIDTH;
+                   canvas.height = img.height * scaleSize;
+                   const ctx = canvas.getContext('2d');
+                   ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
+                   const compressed = canvas.toDataURL('image/jpeg', 0.7);
+                   setCompany({...company, logo: compressed});
+                }
+            };
             reader.readAsDataURL(file);
         }
     }
@@ -632,18 +672,24 @@ const CompanyStep = ({company, setCompany, createdBy, setCreatedBy}: any) => {
         <div className="space-y-4 animate-fade-in">
            <h2 className="text-xl font-bold text-brand-blue flex gap-2"><Building2/> Dados da Empresa</h2>
            
-           <div className="bg-gray-50 p-4 rounded border flex items-center gap-4">
-              {company.logo ? (
-                  <div className="relative">
-                      <img src={company.logo} className="w-16 h-16 object-contain bg-white rounded border"/>
-                      <button onClick={() => setCompany({...company, logo: undefined})} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1"><X size={12}/></button>
+           <div className="bg-gray-50 p-4 rounded border flex items-center justify-between gap-4">
+              <div className="flex items-center gap-4">
+                  {company.logo ? (
+                      <div className="relative">
+                          <img src={company.logo} className="w-16 h-16 object-contain bg-white rounded border"/>
+                          <button onClick={() => setCompany({...company, logo: undefined})} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1"><X size={12}/></button>
+                      </div>
+                  ) : (
+                      <div className="w-16 h-16 bg-gray-200 rounded flex items-center justify-center text-gray-400"><ImagePlus/></div>
+                  )}
+                  <div>
+                      <input type="file" ref={fileRef} className="hidden" accept="image/*" onChange={handleLogo}/>
+                      <Button variant="secondary" onClick={() => fileRef.current?.click()} className="text-xs py-2">Alterar Logo</Button>
                   </div>
-              ) : (
-                  <div className="w-16 h-16 bg-gray-200 rounded flex items-center justify-center text-gray-400"><ImagePlus/></div>
-              )}
-              <div>
-                  <input type="file" ref={fileRef} className="hidden" accept="image/*" onChange={handleLogo}/>
-                  <Button variant="secondary" onClick={() => fileRef.current?.click()} className="text-xs py-2">Alterar Logo</Button>
+              </div>
+              <div className="flex flex-col items-center text-green-600">
+                  <CheckSquare size={20}/>
+                  <span className="text-[10px] font-bold">Salvo</span>
               </div>
            </div>
 
@@ -694,8 +740,9 @@ const ClientStep = ({client, setClient}: any) => {
     )
 }
 
-const ItemsStep = ({items, setItems, discount, setDiscount, observations, setObservations, currentUser, setIsCatalogOpen, catalogList}: any) => {
+const ItemsStep = ({items, setItems, discount, setDiscount, observations, setObservations, currentUser, setIsCatalogOpen, catalogList, setCatalogList}: any) => {
     const [form, setForm] = useState<Partial<ProductItem>>({quantity: 1, unitPrice: 0, description: '', code: ''});
+    const [saveToCatalog, setSaveToCatalog] = useState(false);
     
     // Auto complete handler
     const handleDesc = (e: any) => {
@@ -707,12 +754,34 @@ const ItemsStep = ({items, setItems, discount, setDiscount, observations, setObs
 
     const addItem = () => {
         if(!form.description || !form.unitPrice) return;
-        setItems([...items, {...form, id: Math.random().toString()}]);
+        const newItem = {...form, id: Math.random().toString()} as ProductItem;
+        setItems([...items, newItem]);
         
-        // Auto save to catalog logic check could go here if implemented checkbox again
-        // For now, simpler is better
-        
+        // Save to Catalog Logic
+        if (saveToCatalog) {
+            const currentCatalog = db.getCatalog(currentUser);
+            // Check if item exists (by code or exact description)
+            const existingIndex = currentCatalog.findIndex(i => 
+                (newItem.code && i.code === newItem.code && i.code !== '') || 
+                i.description.toLowerCase() === newItem.description.toLowerCase()
+            );
+
+            let newCatalog;
+            if (existingIndex >= 0) {
+                // Update existing
+                newCatalog = [...currentCatalog];
+                newCatalog[existingIndex] = { ...newCatalog[existingIndex], unitPrice: newItem.unitPrice, code: newItem.code || newCatalog[existingIndex].code };
+            } else {
+                // Add new
+                newCatalog = [...currentCatalog, newItem];
+            }
+            
+            db.saveCatalog(currentUser, newCatalog);
+            setCatalogList(newCatalog); // Update local state for autocomplete
+        }
+
         setForm({quantity: 1, unitPrice: 0, description: '', code: ''});
+        setSaveToCatalog(false);
     }
 
     return (
@@ -732,6 +801,17 @@ const ItemsStep = ({items, setItems, discount, setDiscount, observations, setObs
                 <Input className="col-span-3" label="Descrição" list="catalog-suggestions" value={form.description} onChange={handleDesc} placeholder="Nome do item..."/>
                 <Input className="col-span-1" type="number" label="Qtd" value={form.quantity} onChange={e => setForm({...form, quantity: Number(e.target.value)})}/>
                 <Input className="col-span-1" type="number" label="Preço" value={form.unitPrice || ''} onChange={e => setForm({...form, unitPrice: Number(e.target.value)})}/>
+                
+                <div className="col-span-6 flex items-center gap-2 py-2">
+                    <button 
+                        onClick={() => setSaveToCatalog(!saveToCatalog)} 
+                        className="flex items-center gap-2 text-sm text-gray-700 hover:text-brand-blue transition-colors"
+                    >
+                        {saveToCatalog ? <CheckSquare className="text-brand-blue" size={20}/> : <Square className="text-gray-400" size={20}/>}
+                        Salvar este item no catálogo automaticamente
+                    </button>
+                </div>
+
                 <div className="col-span-6">
                     <Button fullWidth onClick={addItem} disabled={!form.description}>Adicionar Item</Button>
                 </div>
