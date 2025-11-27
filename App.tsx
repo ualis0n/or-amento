@@ -796,46 +796,99 @@ const ItemsStep = ({items, setItems, discount, setDiscount, observations, setObs
                 {catalogList.map((c: ProductItem) => <option key={c.id} value={c.description}/>)}
             </datalist>
 
-            <div className="bg-white p-4 rounded shadow border grid grid-cols-6 gap-2">
-                <Input className="col-span-1" label="Cód" value={form.code} onChange={e => setForm({...form, code: e.target.value})}/>
-                <Input className="col-span-3" label="Descrição" list="catalog-suggestions" value={form.description} onChange={handleDesc} placeholder="Nome do item..."/>
-                <Input className="col-span-1" type="number" label="Qtd" value={form.quantity} onChange={e => setForm({...form, quantity: Number(e.target.value)})}/>
-                <Input className="col-span-1" type="number" label="Preço" value={form.unitPrice || ''} onChange={e => setForm({...form, unitPrice: Number(e.target.value)})}/>
-                
-                <div className="col-span-6 flex items-center gap-2 py-2">
-                    <button 
-                        onClick={() => setSaveToCatalog(!saveToCatalog)} 
-                        className="flex items-center gap-2 text-sm text-gray-700 hover:text-brand-blue transition-colors"
-                    >
-                        {saveToCatalog ? <CheckSquare className="text-brand-blue" size={20}/> : <Square className="text-gray-400" size={20}/>}
-                        Salvar este item no catálogo automaticamente
-                    </button>
+            <div className="bg-white p-4 rounded-xl shadow-md border border-gray-100 flex flex-col gap-4">
+                {/* Linha 1: Descrição (Full Width para facilitar digitação) */}
+                <div className="w-full">
+                    <Input 
+                        label="Descrição do Produto / Serviço" 
+                        list="catalog-suggestions" 
+                        value={form.description} 
+                        onChange={handleDesc} 
+                        placeholder="Ex: Instalação de Ar Condicionado"
+                        className="h-12 text-lg" 
+                    />
                 </div>
 
-                <div className="col-span-6">
-                    <Button fullWidth onClick={addItem} disabled={!form.description}>Adicionar Item</Button>
+                <div className="flex gap-3">
+                    {/* Linha 2: Código, Qtd e Preço organizados para toque */}
+                    <div className="w-1/4">
+                        <Input 
+                            label="Cód." 
+                            value={form.code} 
+                            onChange={e => setForm({...form, code: e.target.value})}
+                            placeholder="001"
+                            className="text-center"
+                        />
+                    </div>
+                    
+                    <div className="w-1/4">
+                        <Input 
+                            type="number" 
+                            inputMode="numeric"
+                            label="Qtd." 
+                            value={form.quantity} 
+                            onChange={e => setForm({...form, quantity: Number(e.target.value)})}
+                            className="text-center h-12 text-lg"
+                        />
+                    </div>
+
+                    <div className="w-1/2">
+                        <Input 
+                            type="number" 
+                            inputMode="decimal"
+                            label="Valor Unit. (R$)" 
+                            value={form.unitPrice || ''} 
+                            onChange={e => setForm({...form, unitPrice: Number(e.target.value)})}
+                            placeholder="0,00"
+                            className="h-12 text-lg font-bold text-gray-800"
+                        />
+                    </div>
+                </div>
+                
+                <div className="flex items-center gap-2 py-2 bg-gray-50 p-2 rounded cursor-pointer" onClick={() => setSaveToCatalog(!saveToCatalog)}>
+                    {saveToCatalog ? <CheckSquare className="text-brand-blue" size={24}/> : <Square className="text-gray-400" size={24}/>}
+                    <span className="text-sm text-gray-700">Salvar item no catálogo</span>
+                </div>
+
+                <div>
+                    <Button fullWidth onClick={addItem} disabled={!form.description} className="h-14 text-lg shadow-md">
+                        <Plus className="mr-2" /> Adicionar Item
+                    </Button>
                 </div>
             </div>
 
             <div className="space-y-2">
+                {items.length > 0 && <h3 className="font-bold text-gray-600 text-sm uppercase mt-4">Itens Adicionados ({items.length})</h3>}
                 {items.map((item: ProductItem) => (
-                    <div key={item.id} className="bg-white p-3 rounded border flex justify-between items-center">
-                        <div>
-                            <p className="font-bold text-sm">{item.description}</p>
-                            <p className="text-xs text-gray-500">{item.quantity} x {formatCurrency(item.unitPrice)}</p>
+                    <div key={item.id} className="bg-white p-4 rounded-lg shadow-sm border border-gray-100 flex justify-between items-center">
+                        <div className="flex-1">
+                            <p className="font-bold text-gray-800">{item.description}</p>
+                            <div className="flex gap-2 text-sm text-gray-500 mt-1">
+                                <span className="bg-gray-100 px-2 rounded">Qtd: {item.quantity}</span>
+                                <span>x {formatCurrency(item.unitPrice)}</span>
+                            </div>
                         </div>
-                        <div className="flex gap-2 items-center">
-                            <span className="font-bold text-gray-700 mr-2">{formatCurrency(item.quantity * item.unitPrice)}</span>
-                            <button onClick={() => setItems(items.filter((i: any) => i.id !== item.id))} className="text-red-500 p-1"><Trash2 size={16}/></button>
+                        <div className="flex flex-col items-end gap-1">
+                            <span className="font-bold text-lg text-brand-blue">{formatCurrency(item.quantity * item.unitPrice)}</span>
+                            <button onClick={() => setItems(items.filter((i: any) => i.id !== item.id))} className="text-red-500 text-xs flex items-center bg-red-50 px-2 py-1 rounded hover:bg-red-100">
+                                <Trash2 size={12} className="mr-1"/> Remover
+                            </button>
                         </div>
                     </div>
                 ))}
             </div>
             
-            <div className="pt-4 border-t">
-                <Input label="Desconto (R$)" type="number" value={discount || ''} onChange={e => setDiscount(Number(e.target.value))}/>
-                <label className="text-sm font-bold text-gray-700">Observações</label>
-                <textarea className="w-full border p-2 rounded h-20" value={observations} onChange={e => setObservations(e.target.value)}></textarea>
+            <div className="pt-6 border-t mt-6">
+                <div className="bg-blue-50 p-4 rounded-lg mb-4">
+                    <Input label="Desconto no Total (R$)" type="number" inputMode="decimal" value={discount || ''} onChange={e => setDiscount(Number(e.target.value))} className="bg-white"/>
+                </div>
+                <label className="text-sm font-bold text-gray-700 mb-1 block">Observações do Orçamento</label>
+                <textarea 
+                    className="w-full border p-3 rounded-lg h-24 focus:ring-2 focus:ring-brand-blue outline-none" 
+                    placeholder="Ex: Validade da proposta, condições de pagamento..."
+                    value={observations} 
+                    onChange={e => setObservations(e.target.value)}
+                ></textarea>
             </div>
         </div>
     )
