@@ -480,10 +480,13 @@ export default function App() {
               <div className="w-20"></div>
            </div>
            
-           <div className="bg-white shadow-xl print:shadow-none" style={{ width: '210mm' }}>
-             <div id="quote-content">
-               <QuoteTemplate data={quoteData} />
-             </div>
+           {/* Container Responsivo com Zoom para Mobile (CORREÇÃO APLICADA) */}
+           <div className="w-full overflow-hidden flex justify-center my-4">
+               <div className="origin-top transform scale-[0.42] sm:scale-75 md:scale-100 transition-transform duration-200 bg-white shadow-2xl print:shadow-none print:transform-none" style={{ width: '210mm', minHeight: '297mm' }}>
+                 <div id="quote-content" className="h-full">
+                   <QuoteTemplate data={quoteData} />
+                 </div>
+               </div>
            </div>
 
            <div className="fixed bottom-0 left-0 right-0 bg-white border-t p-4 flex gap-3 justify-center shadow-2xl z-50 no-print">
@@ -805,7 +808,7 @@ const ItemsStep = ({items, setItems, discount, setDiscount, observations, setObs
                         value={form.description} 
                         onChange={handleDesc} 
                         placeholder="Ex: Instalação de Ar Condicionado"
-                        className="h-12 text-lg" 
+                        className="h-14 text-lg" 
                     />
                 </div>
 
@@ -817,7 +820,7 @@ const ItemsStep = ({items, setItems, discount, setDiscount, observations, setObs
                             value={form.code} 
                             onChange={e => setForm({...form, code: e.target.value})}
                             placeholder="001"
-                            className="text-center"
+                            className="text-center h-14 text-lg"
                         />
                     </div>
                     
@@ -828,7 +831,7 @@ const ItemsStep = ({items, setItems, discount, setDiscount, observations, setObs
                             label="Qtd." 
                             value={form.quantity} 
                             onChange={e => setForm({...form, quantity: Number(e.target.value)})}
-                            className="text-center h-12 text-lg"
+                            className="text-center h-14 text-lg"
                         />
                     </div>
 
@@ -840,7 +843,7 @@ const ItemsStep = ({items, setItems, discount, setDiscount, observations, setObs
                             value={form.unitPrice || ''} 
                             onChange={e => setForm({...form, unitPrice: Number(e.target.value)})}
                             placeholder="0,00"
-                            className="h-12 text-lg font-bold text-gray-800"
+                            className="h-14 text-lg font-bold text-gray-800"
                         />
                     </div>
                 </div>
@@ -880,11 +883,11 @@ const ItemsStep = ({items, setItems, discount, setDiscount, observations, setObs
             
             <div className="pt-6 border-t mt-6">
                 <div className="bg-blue-50 p-4 rounded-lg mb-4">
-                    <Input label="Desconto no Total (R$)" type="number" inputMode="decimal" value={discount || ''} onChange={e => setDiscount(Number(e.target.value))} className="bg-white"/>
+                    <Input label="Desconto no Total (R$)" type="number" inputMode="decimal" value={discount || ''} onChange={e => setDiscount(Number(e.target.value))} className="bg-white h-14 text-lg"/>
                 </div>
                 <label className="text-sm font-bold text-gray-700 mb-1 block">Observações do Orçamento</label>
                 <textarea 
-                    className="w-full border p-3 rounded-lg h-24 focus:ring-2 focus:ring-brand-blue outline-none" 
+                    className="w-full border p-3 rounded-lg h-24 focus:ring-2 focus:ring-brand-blue outline-none text-lg" 
                     placeholder="Ex: Validade da proposta, condições de pagamento..."
                     value={observations} 
                     onChange={e => setObservations(e.target.value)}
