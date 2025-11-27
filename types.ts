@@ -40,3 +40,10 @@ export interface QuoteData {
   observations: string;
   discount?: number;
 }
+
+// Nova interface para o Histórico
+export interface SavedQuote extends QuoteData {
+  id: string; // ID único do registro no banco
+  savedAt: number; // Timestamp de quando foi salvo
+  totalValue: number;
+}

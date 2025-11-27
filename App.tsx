@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { CompanyData, ClientData, ProductItem, QuoteData } from './types';
+import { CompanyData, ClientData, ProductItem, QuoteData, SavedQuote } from './types';
 import { generateId, formatDate, formatCurrency } from './utils';
+import { db } from './services/db'; // Importando o banco de dados
 import { Input } from './components/Input';
 import { Button } from './components/Button';
 import { QuoteTemplate } from './components/QuoteTemplate';
@@ -25,10 +26,15 @@ import {
   DollarSign,
   LogOut,
   Lock,
-  AlertTriangle
+  AlertTriangle,
+  LayoutDashboard,
+  History,
+  Settings,
+  ArrowLeft
 } from 'lucide-react';
 
-// Default Company Data Template
+// --- CONSTANTS & DEFAULTS ---
+
 const DEFAULT_COMPANY_TEMPLATE: CompanyData = {
   name: "SUA EMPRESA AQUI",
   cnpj: "00.000.000/0001-00",
@@ -38,7 +44,6 @@ const DEFAULT_COMPANY_TEMPLATE: CompanyData = {
   phone: "(00) 00000-0000"
 };
 
-// Initial States
 const INITIAL_CLIENT: ClientData = {
   name: "", address: "", neighborhood: "", city: "", state: "", 
   zip: "", phone: "", mobile: "", email: "", cpfCnpj: "", rgIe: ""
@@ -51,40 +56,45 @@ enum Step {
   PREVIEW = 4
 }
 
-// --- CATALOG MODAL COMPONENT ---
+type AppView = 'dashboard' | 'create_quote' | 'history' | 'settings';
+
+// --- SUB-COMPONENTS ---
+
+// 1. Catalog Modal (Gerenciamento de Produtos)
 interface CatalogModalProps {
   isOpen: boolean;
   onClose: () => void;
-  catalog: ProductItem[];
-  onDelete: (id: string) => void;
-  onSelect: (item: ProductItem) => void;
-  onUpdate: (item: ProductItem) => void;
+  email: string;
+  onSelect?: (item: ProductItem) => void;
 }
 
-const CatalogModal: React.FC<CatalogModalProps> = ({ isOpen, onClose, catalog, onDelete, onSelect, onUpdate }) => {
+const CatalogModal: React.FC<CatalogModalProps> = ({ isOpen, onClose, email, onSelect }) => {
+  const [items, setItems] = useState<ProductItem[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<ProductItem>>({});
 
-  if (!isOpen) return null;
+  useEffect(() => {
+    if (isOpen) {
+      setItems(db.getCatalog(email));
+    }
+  }, [isOpen, email]);
 
-  const startEdit = (e: React.MouseEvent, item: ProductItem) => {
-    e.stopPropagation();
-    setEditingId(item.id);
-    setEditForm(item);
+  const handleDelete = (id: string) => {
+    const newItems = items.filter(i => i.id !== id);
+    setItems(newItems);
+    db.saveCatalog(email, newItems);
   };
 
-  const saveEdit = (e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleUpdate = () => {
     if (editingId && editForm.description && editForm.unitPrice) {
-      onUpdate(editForm as ProductItem);
+      const newItems = items.map(i => i.id === editingId ? { ...i, ...editForm } as ProductItem : i);
+      setItems(newItems);
+      db.saveCatalog(email, newItems);
       setEditingId(null);
     }
   };
 
-  const cancelEdit = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setEditingId(null);
-  };
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
@@ -93,77 +103,40 @@ const CatalogModal: React.FC<CatalogModalProps> = ({ isOpen, onClose, catalog, o
           <h3 className="font-bold text-lg text-gray-800 flex items-center">
             <Package className="mr-2" size={20}/> Catálogo de Produtos
           </h3>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
-            <X size={24} />
-          </button>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-700"><X size={24} /></button>
         </div>
         
-        <div className="p-4 overflow-y-auto flex-1">
-          {catalog.length === 0 ? (
+        <div className="p-4 overflow-y-auto flex-1 bg-gray-50">
+          {items.length === 0 ? (
             <div className="text-center py-8 text-gray-500">
               <Package size={48} className="mx-auto mb-3 opacity-20" />
               <p>Nenhum produto salvo.</p>
-              <p className="text-xs mt-2">Salve itens novos marcando a opção "Salvar no Catálogo" ao adicionar.</p>
             </div>
           ) : (
             <div className="space-y-2">
-              <p className="text-xs text-gray-500 mb-2">Clique em um item para preencher o formulário:</p>
-              {catalog.map(item => (
-                <div key={item.id} className="border rounded p-3 flex flex-col gap-2 hover:bg-blue-50 transition-colors group">
-                  
+              {items.map(item => (
+                <div key={item.id} className="bg-white border rounded p-3 shadow-sm">
                   {editingId === item.id ? (
-                    // Modo Edição
-                    <div className="flex flex-col gap-2 bg-white p-2 rounded shadow-inner" onClick={e => e.stopPropagation()}>
-                       <input 
-                         className="border p-1 text-sm rounded" 
-                         value={editForm.description} 
-                         onChange={e => setEditForm({...editForm, description: e.target.value})}
-                         placeholder="Descrição"
-                       />
+                    <div className="flex flex-col gap-2">
+                       <input className="border p-1 text-sm rounded" value={editForm.description} onChange={e => setEditForm({...editForm, description: e.target.value})} placeholder="Descrição" />
                        <div className="flex gap-2">
-                         <input 
-                           className="border p-1 text-sm rounded w-1/3" 
-                           value={editForm.code} 
-                           onChange={e => setEditForm({...editForm, code: e.target.value})}
-                           placeholder="Cód"
-                         />
-                         <input 
-                           className="border p-1 text-sm rounded w-1/3" 
-                           type="number"
-                           value={editForm.unitPrice} 
-                           onChange={e => setEditForm({...editForm, unitPrice: Number(e.target.value)})}
-                           placeholder="Preço"
-                         />
+                         <input className="border p-1 text-sm rounded w-1/3" value={editForm.code} onChange={e => setEditForm({...editForm, code: e.target.value})} placeholder="Cód" />
+                         <input className="border p-1 text-sm rounded w-1/3" type="number" value={editForm.unitPrice} onChange={e => setEditForm({...editForm, unitPrice: Number(e.target.value)})} placeholder="Preço" />
                        </div>
                        <div className="flex justify-end gap-2 mt-1">
-                          <button onClick={cancelEdit} className="text-xs text-gray-500 px-2 py-1">Cancelar</button>
-                          <button onClick={saveEdit} className="text-xs bg-green-600 text-white px-2 py-1 rounded">Salvar</button>
+                          <button onClick={() => setEditingId(null)} className="text-xs text-gray-500">Cancelar</button>
+                          <button onClick={handleUpdate} className="text-xs bg-green-600 text-white px-2 py-1 rounded">Salvar</button>
                        </div>
                     </div>
                   ) : (
-                    // Modo Visualização
-                    <div className="flex justify-between items-center w-full">
-                        <div className="flex-1 cursor-pointer" onClick={() => { onSelect(item); onClose(); }}>
+                    <div className="flex justify-between items-center">
+                        <div className="flex-1 cursor-pointer" onClick={() => { if(onSelect) { onSelect(item); onClose(); } }}>
                           <p className="font-bold text-sm text-brand-blue">{item.description}</p>
-                          <p className="text-xs text-gray-500">
-                            Cód: {item.code || '-'} | {formatCurrency(item.unitPrice)}
-                          </p>
+                          <p className="text-xs text-gray-500">Cód: {item.code || '-'} | {formatCurrency(item.unitPrice)}</p>
                         </div>
-                        <div className="flex items-center gap-1">
-                          <button 
-                            onClick={(e) => startEdit(e, item)}
-                            className="p-2 text-gray-300 hover:text-blue-500 hover:bg-blue-100 rounded-full"
-                            title="Editar"
-                          >
-                            <Edit2 size={16} />
-                          </button>
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); onDelete(item.id); }}
-                            className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-full"
-                            title="Excluir"
-                          >
-                            <Trash2 size={16} />
-                          </button>
+                        <div className="flex gap-1">
+                          <button onClick={() => { setEditingId(item.id); setEditForm(item); }} className="p-2 text-blue-500 hover:bg-blue-50 rounded-full"><Edit2 size={16} /></button>
+                          <button onClick={() => handleDelete(item.id)} className="p-2 text-red-500 hover:bg-red-50 rounded-full"><Trash2 size={16} /></button>
                         </div>
                     </div>
                   )}
@@ -172,224 +145,119 @@ const CatalogModal: React.FC<CatalogModalProps> = ({ isOpen, onClose, catalog, o
             </div>
           )}
         </div>
-        
-        <div className="p-4 border-t bg-gray-50 rounded-b-lg">
-          <Button onClick={onClose} variant="secondary" fullWidth className="py-2">
-            Fechar
-          </Button>
+        <div className="p-4 border-t bg-white rounded-b-lg">
+          <Button onClick={onClose} variant="secondary" fullWidth>Fechar</Button>
         </div>
       </div>
     </div>
   );
 };
 
-// --- AUTH COMPONENT ---
+// 2. Auth Screen (Login)
 interface AuthScreenProps {
   onLogin: (email: string) => void;
 }
 
 const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin }) => {
   const [email, setEmail] = useState("");
-  const [error, setError] = useState("");
-  
-  // Lista fictícia de usuários autorizados (persistida no localStorage para simular backend)
-  // No primeiro uso, não haverá ninguém.
   const [accessKey, setAccessKey] = useState("");
+  const [error, setError] = useState("");
   const [showKeyInput, setShowKeyInput] = useState(false);
-
-  // CHAVE MESTRA DO SISTEMA (SIMULANDO SAAS)
   const SYSTEM_ACCESS_KEY = "admin123"; 
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-
-    if (!email.trim() || !email.includes('@')) {
-      setError("Por favor, insira um e-mail válido.");
-      return;
-    }
-
-    const cleanEmail = email.toLowerCase().trim();
+    if (!email.trim() || !email.includes('@')) { setError("Email inválido"); return; }
     
-    // Verificar se usuário já está autorizado
+    const cleanEmail = email.toLowerCase().trim();
     const authorizedUsers = JSON.parse(localStorage.getItem('saas_authorized_users') || '[]');
     
     if (authorizedUsers.includes(cleanEmail)) {
-      // Login direto
       onLogin(cleanEmail);
     } else {
-      // Novo usuário: Pede chave de acesso
       if (!showKeyInput) {
         setShowKeyInput(true);
-        setError("E-mail não cadastrado. Insira a Chave de Acesso do Sistema para liberar.");
+        setError("Email novo. Insira a Chave de Acesso.");
         return;
       }
-
-      // Validar chave
       if (accessKey === SYSTEM_ACCESS_KEY) {
-        // Autorizar e Logar
-        const newAuthList = [...authorizedUsers, cleanEmail];
-        localStorage.setItem('saas_authorized_users', JSON.stringify(newAuthList));
+        localStorage.setItem('saas_authorized_users', JSON.stringify([...authorizedUsers, cleanEmail]));
         onLogin(cleanEmail);
       } else {
-        setError("Chave de acesso incorreta.");
+        setError("Chave incorreta.");
       }
     }
   };
 
   return (
     <div className="min-h-screen bg-brand-blue flex items-center justify-center p-4">
-      <div className="bg-white rounded-lg shadow-2xl p-8 w-full max-w-md animate-fade-in">
-        <div className="text-center mb-8">
+      <div className="bg-white rounded-lg shadow-2xl p-8 w-full max-w-md">
+        <div className="text-center mb-6">
           <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
             <Lock className="text-brand-blue" size={32} />
           </div>
           <h1 className="text-2xl font-bold text-gray-800">Orçamentos WA</h1>
-          <p className="text-gray-500 text-sm mt-2">Acesso ao Sistema</p>
+          <p className="text-gray-500 text-sm">Sistema de Gestão</p>
         </div>
-
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Seu E-mail</label>
-            <input 
-              type="email" 
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-blue focus:border-transparent outline-none transition-all"
-              placeholder="seu@email.com"
-              value={email}
-              onChange={(e) => { setEmail(e.target.value); setError(""); setShowKeyInput(false); }}
-            />
-          </div>
-
-          {showKeyInput && (
-             <div className="animate-fade-in">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Chave de Acesso (Primeiro Acesso)</label>
-              <input 
-                type="password" 
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-blue focus:border-transparent outline-none transition-all"
-                placeholder="Senha do Admin"
-                value={accessKey}
-                onChange={(e) => setAccessKey(e.target.value)}
-              />
-            </div>
-          )}
-
-          {error && <p className="text-xs text-red-500 font-bold bg-red-50 p-2 rounded">{error}</p>}
-
-          <Button type="submit" fullWidth>
-            {showKeyInput ? "Autorizar e Entrar" : "Continuar"}
-          </Button>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <Input label="Email" value={email} onChange={e => {setEmail(e.target.value); setError("");}} placeholder="seu@email.com" />
+          {showKeyInput && <Input label="Chave de Acesso" type="password" value={accessKey} onChange={e => setAccessKey(e.target.value)} />}
+          {error && <p className="text-red-500 text-sm font-bold bg-red-50 p-2 rounded">{error}</p>}
+          <Button type="submit" fullWidth>{showKeyInput ? "Cadastrar e Entrar" : "Entrar"}</Button>
         </form>
-
-        <div className="mt-8 text-center text-xs text-gray-400">
-          <p>Seus dados são privados e isolados neste dispositivo.</p>
-        </div>
       </div>
     </div>
   );
 };
 
-// --- MAIN APP COMPONENT ---
-export default function App() {
-  // Auth State
-  const [currentUser, setCurrentUser] = useState<string | null>(null);
+// --- MAIN APP ---
 
-  // App State
+export default function App() {
+  const [currentUser, setCurrentUser] = useState<string | null>(null);
+  const [view, setView] = useState<AppView>('dashboard');
+  
+  // Create Quote State
   const [step, setStep] = useState<Step>(Step.COMPANY);
   const [company, setCompany] = useState<CompanyData>(DEFAULT_COMPANY_TEMPLATE);
   const [client, setClient] = useState<ClientData>(INITIAL_CLIENT);
   const [items, setItems] = useState<ProductItem[]>([]);
   const [discount, setDiscount] = useState<number>(0);
   const [observations, setObservations] = useState<string>("");
-  const [quoteNumber] = useState<string>(Math.floor(1000 + Math.random() * 9000).toString());
+  const [quoteNumber, setQuoteNumber] = useState<string>("");
   const [createdBy, setCreatedBy] = useState<string>("");
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [isLoadingCep, setIsLoadingCep] = useState(false);
-  const [validationError, setValidationError] = useState<string | null>(null);
   
-  // Catalog State
-  const [catalog, setCatalog] = useState<ProductItem[]>([]);
+  // UI State
+  const [isLoading, setIsLoading] = useState(false);
   const [isCatalogOpen, setIsCatalogOpen] = useState(false);
-  const [saveToCatalog, setSaveToCatalog] = useState(false);
+  const [validationAlert, setValidationAlert] = useState<string | null>(null);
+  
+  // History State
+  const [historyList, setHistoryList] = useState<SavedQuote[]>([]);
+  const [selectedQuote, setSelectedQuote] = useState<QuoteData | null>(null);
 
-  // Image Upload Ref
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // Catalog State for autocomplete
+  const [catalogList, setCatalogList] = useState<ProductItem[]>([]);
 
-  // Item Form State
-  const [currentItem, setCurrentItem] = useState<Partial<ProductItem>>({
-    code: "", description: "", quantity: 1, unitPrice: 0
-  });
-  const [isEditingItem, setIsEditingItem] = useState<string | null>(null);
-
-  // --- AUTH EFFECTS ---
+  // Init
   useEffect(() => {
-    // Check if user is already logged in (session persistence)
     const savedUser = localStorage.getItem('saas_current_user');
-    if (savedUser) {
-      setCurrentUser(savedUser);
-    }
+    if (savedUser) setCurrentUser(savedUser);
   }, []);
 
-  // --- DATA LOADING EFFECTS ---
-  // Triggered whenever currentUser changes
-  useEffect(() => {
-    if (!currentUser) return;
-
-    // Load Company Data for this user
-    const savedCompany = localStorage.getItem(`saas_${currentUser}_company`);
-    if (savedCompany) {
-      setCompany(JSON.parse(savedCompany));
-    } else {
-      setCompany(DEFAULT_COMPANY_TEMPLATE); // Reset to default for new user
-    }
-
-    // Load Catalog for this user
-    const savedCatalog = localStorage.getItem(`saas_${currentUser}_catalog`);
-    if (savedCatalog) {
-      setCatalog(JSON.parse(savedCatalog));
-    } else {
-      setCatalog([]); // Reset catalog for new user
-    }
-
-    // Load Created By Name (optional preference)
-    const savedCreatedBy = localStorage.getItem(`saas_${currentUser}_createdby`);
-    if (savedCreatedBy) setCreatedBy(savedCreatedBy);
-
-    // Reset Quote Flow
-    setStep(Step.COMPANY);
-    setClient(INITIAL_CLIENT);
-    setItems([]);
-    setDiscount(0);
-    setObservations("");
-
-  }, [currentUser]);
-
-  // --- DATA PERSISTENCE EFFECTS ---
-  
-  // Persist company
+  // Load User Data
   useEffect(() => {
     if (currentUser) {
-      localStorage.setItem(`saas_${currentUser}_company`, JSON.stringify(company));
+      const savedCompany = db.getCompany(currentUser);
+      if (savedCompany) setCompany(savedCompany);
+      setCatalogList(db.getCatalog(currentUser));
     }
-  }, [company, currentUser]);
-
-  // Persist createdBy
-  useEffect(() => {
-    if (currentUser) {
-      localStorage.setItem(`saas_${currentUser}_createdby`, createdBy);
-    }
-  }, [createdBy, currentUser]);
-
-  // Helper to persist catalog
-  const updateCatalog = (newCatalog: ProductItem[]) => {
-    setCatalog(newCatalog);
-    if (currentUser) {
-      localStorage.setItem(`saas_${currentUser}_catalog`, JSON.stringify(newCatalog));
-    }
-  };
+  }, [currentUser, view]);
 
   const handleLogin = (email: string) => {
     localStorage.setItem('saas_current_user', email);
     setCurrentUser(email);
+    setView('dashboard');
   };
 
   const handleLogout = () => {
@@ -397,688 +265,498 @@ export default function App() {
     setCurrentUser(null);
   };
 
-  const showValidationAlert = (msg: string) => {
-    setValidationError(msg);
-    // Auto-hide after 3.5 seconds
-    setTimeout(() => {
-      setValidationError(null);
-    }, 3500);
+  const startNewQuote = () => {
+    setClient(INITIAL_CLIENT);
+    setItems([]);
+    setDiscount(0);
+    setObservations("");
+    setQuoteNumber(Math.floor(1000 + Math.random() * 9000).toString());
+    setStep(Step.COMPANY);
+    setSelectedQuote(null);
+    setView('create_quote');
   };
 
-  const handleNext = () => {
-    // Validação Cliente
+  const showAlert = (msg: string) => {
+    setValidationAlert(msg);
+    setTimeout(() => setValidationAlert(null), 3000);
+  };
+
+  // --- WIZARD LOGIC ---
+
+  const handleNextStep = () => {
     if (step === Step.CLIENT) {
-      if (!client.name || !client.name.trim()) {
-        showValidationAlert("Campo Obrigatório: Preencha o NOME DO CLIENTE.");
-        return;
-      }
-      if (!client.mobile || !client.mobile.trim()) {
-        showValidationAlert("Campo Obrigatório: Preencha o TELEFONE ou CELULAR.");
+      if (!client.name.trim() || !client.mobile.trim()) {
+        showAlert("Preencha Nome e Telefone do Cliente");
         return;
       }
     }
-
-    // Validação Itens
     if (step === Step.ITEMS) {
       if (items.length === 0) {
-        showValidationAlert("Orçamento Vazio: Adicione pelo menos um item.");
+        showAlert("Adicione pelo menos um item");
         return;
       }
     }
 
-    if (step < Step.PREVIEW) setStep(step + 1);
-  };
-
-  const handleBack = () => {
-    if (step > Step.COMPANY) setStep(step - 1);
-  };
-  
-  // Logo Upload Handler
-  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (file.size > 2 * 1024 * 1024) { // 2MB Limit
-        alert("A imagem é muito grande. Por favor escolha uma menor que 2MB.");
-        return;
-      }
-
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setCompany({ ...company, logo: reader.result as string });
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const removeLogo = () => {
-    setCompany({ ...company, logo: undefined });
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  };
-
-  // CEP Handler
-  const handleCepChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newCep = e.target.value;
-    setClient({ ...client, zip: newCep });
-
-    // Remove caracteres não numéricos
-    const cleanCep = newCep.replace(/\D/g, '');
-
-    if (cleanCep.length === 8) {
-      setIsLoadingCep(true);
-      try {
-        const response = await fetch(`https://viacep.com.br/ws/${cleanCep}/json/`);
-        const data = await response.json();
-
-        if (!data.erro) {
-          setClient(prev => ({
-            ...prev,
-            address: data.logradouro,
-            neighborhood: data.bairro,
-            city: data.localidade,
-            state: data.uf,
-            zip: newCep // Mantém o valor digitado
-          }));
-        } else {
-          // CEP não encontrado (mas formato válido)
-          console.warn("CEP não encontrado");
+    // Se estiver indo para a prévia (passo 4)
+    if (step === Step.ITEMS) {
+        // SALVAR DADOS DA EMPRESA
+        if (currentUser) db.saveCompany(currentUser, company);
+        
+        // SALVAR ORÇAMENTO NO HISTÓRICO AUTOMATICAMENTE
+        if (currentUser && !selectedQuote) { // Só salva se for novo, não se estiver vendo histórico
+            const quoteToSave: QuoteData = {
+                number: quoteNumber,
+                date: formatDate(new Date()),
+                createdBy,
+                company,
+                client,
+                items,
+                observations,
+                discount
+            };
+            db.addQuote(currentUser, quoteToSave);
+            showAlert("Orçamento Salvo com Sucesso!");
         }
-      } catch (error) {
-        console.error("Erro ao buscar CEP", error);
-      } finally {
-        setIsLoadingCep(false);
-      }
-    }
-  };
-
-  // --- ITEM LOGIC ---
-
-  // Auto-fill by Code
-  const handleCodeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const code = e.target.value;
-    setCurrentItem(prev => ({ ...prev, code }));
-
-    if (code) {
-      const found = catalog.find(i => i.code === code);
-      if (found) {
-        setCurrentItem(prev => ({
-          ...prev,
-          code, // keep current input
-          description: found.description,
-          unitPrice: found.unitPrice
-        }));
-      }
-    }
-  };
-
-  // Auto-fill by Description
-  const handleDescriptionChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const desc = e.target.value;
-    setCurrentItem(prev => ({ ...prev, description: desc }));
-
-    // Check for exact match in catalog to autofill price/code
-    const found = catalog.find(i => i.description.toLowerCase() === desc.toLowerCase());
-    if (found) {
-        setCurrentItem(prev => ({
-            ...prev,
-            description: desc, // keep current input
-            code: found.code,
-            unitPrice: found.unitPrice
-        }));
-    }
-  };
-
-  const addItem = () => {
-    if (!currentItem.description || !currentItem.unitPrice) return;
-    
-    // Logic to add to items list
-    if (isEditingItem) {
-      setItems(items.map(i => i.id === isEditingItem ? { ...i, ...currentItem as ProductItem } : i));
-      setIsEditingItem(null);
-    } else {
-      setItems([...items, { ...currentItem, id: generateId() } as ProductItem]);
     }
 
-    // Logic to save to catalog if checkbox is checked
-    if (saveToCatalog && !isEditingItem) {
-      // Check if already exists to avoid duplicates (simple check by description)
-      const exists = catalog.some(c => c.description.toLowerCase() === currentItem.description?.toLowerCase());
-      if (!exists) {
-        const newItemForCatalog = { ...currentItem, id: generateId() } as ProductItem;
-        updateCatalog([...catalog, newItemForCatalog]);
-      }
-    }
-    
-    setCurrentItem({ code: "", description: "", quantity: 1, unitPrice: 0 });
-    setSaveToCatalog(false); // Reset checkbox
+    setStep(step + 1);
   };
 
-  const deleteItem = (id: string) => {
-    setItems(items.filter(i => i.id !== id));
-  };
+  // --- RENDER VIEWS ---
 
-  const editItem = (item: ProductItem) => {
-    setCurrentItem(item);
-    setIsEditingItem(item.id);
-  };
+  // 1. DASHBOARD VIEW
+  const renderDashboard = () => (
+    <div className="p-6 max-w-4xl mx-auto animate-fade-in">
+       <div className="mb-8">
+         <h2 className="text-2xl font-bold text-gray-800">Olá, Usuário</h2>
+         <p className="text-gray-500">{currentUser}</p>
+       </div>
 
-  // Catalog Handlers
-  const deleteFromCatalog = (id: string) => {
-    const newCatalog = catalog.filter(item => item.id !== id);
-    updateCatalog(newCatalog);
-  };
+       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <button onClick={startNewQuote} className="bg-brand-blue text-white p-6 rounded-xl shadow-lg hover:bg-blue-900 transition flex items-center justify-between group">
+             <div>
+                <Plus size={32} className="mb-2" />
+                <h3 className="text-xl font-bold">Novo Orçamento</h3>
+                <p className="text-blue-200 text-sm">Criar proposta comercial</p>
+             </div>
+             <ChevronRight className="opacity-0 group-hover:opacity-100 transition-opacity" />
+          </button>
 
-  const updateCatalogItem = (updatedItem: ProductItem) => {
-    const newCatalog = catalog.map(item => item.id === updatedItem.id ? updatedItem : item);
-    updateCatalog(newCatalog);
-  };
+          <button onClick={() => { setHistoryList(db.getQuotes(currentUser!)); setView('history'); }} className="bg-white text-gray-800 p-6 rounded-xl shadow border border-gray-200 hover:bg-gray-50 transition flex items-center justify-between group">
+             <div>
+                <History size={32} className="mb-2 text-brand-blue" />
+                <h3 className="text-xl font-bold">Meus Orçamentos</h3>
+                <p className="text-gray-500 text-sm">Ver histórico salvo</p>
+             </div>
+             <ChevronRight className="opacity-0 group-hover:opacity-100 transition-opacity" />
+          </button>
+       </div>
+       
+       <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+          <button onClick={() => setIsCatalogOpen(true)} className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex items-center gap-4 hover:bg-gray-50">
+             <div className="bg-green-100 p-3 rounded-full text-green-700"><Package size={24} /></div>
+             <div className="text-left">
+                <h4 className="font-bold">Catálogo de Produtos</h4>
+                <p className="text-xs text-gray-500">Gerenciar itens salvos</p>
+             </div>
+          </button>
 
-  const selectFromCatalog = (item: ProductItem) => {
-    setCurrentItem({
-      code: item.code,
-      description: item.description,
-      unitPrice: item.unitPrice,
-      quantity: 1
-    });
-  };
+          <button onClick={() => {
+              const data = db.exportData(currentUser!);
+              const blob = new Blob([data], {type: 'application/json'});
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `backup_${formatDate(new Date())}.json`;
+              a.click();
+          }} className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex items-center gap-4 hover:bg-gray-50">
+             <div className="bg-orange-100 p-3 rounded-full text-orange-700"><Save size={24} /></div>
+             <div className="text-left">
+                <h4 className="font-bold">Fazer Backup</h4>
+                <p className="text-xs text-gray-500">Baixar dados do sistema</p>
+             </div>
+          </button>
+       </div>
+    </div>
+  );
 
-  // PDF Configuration Options
-  const getPdfOptions = () => {
-    const safeClientName = (client.name || 'Cliente').replace(/[^a-z0-9]/gi, '_').substring(0, 15);
-    const filename = `Orcamento_${quoteNumber}_${safeClientName}.pdf`;
-    
-    return {
-      margin: 0,
-      filename: filename,
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { 
-        scale: 2, 
-        useCORS: true, 
-        scrollY: 0,
-        logging: false 
-      },
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-    };
-  };
+  // 2. HISTORY VIEW
+  const renderHistory = () => (
+    <div className="p-4 max-w-4xl mx-auto h-full flex flex-col animate-fade-in">
+       <div className="flex items-center gap-4 mb-6">
+          <button onClick={() => setView('dashboard')}><ArrowLeft size={24}/></button>
+          <h2 className="text-xl font-bold">Histórico de Orçamentos</h2>
+       </div>
 
-  const handleSavePDF = async () => {
-    setIsGenerating(true);
-    const element = document.getElementById('quote-content');
-    const opt = getPdfOptions();
+       <div className="space-y-3 flex-1 overflow-auto pb-20">
+          {historyList.length === 0 ? (
+             <div className="text-center py-10 text-gray-400">Nenhum orçamento salvo.</div>
+          ) : (
+             historyList.map(quote => (
+                <div key={quote.id} className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                   <div>
+                      <div className="flex items-center gap-2 mb-1">
+                         <span className="font-bold text-lg text-brand-blue">#{quote.number}</span>
+                         <span className="text-xs bg-gray-100 px-2 py-1 rounded text-gray-600">{quote.date}</span>
+                      </div>
+                      <p className="font-medium">{quote.client.name}</p>
+                      <p className="text-sm text-gray-500">{quote.items.length} itens • Total: <span className="font-bold text-gray-800">{formatCurrency(quote.totalValue)}</span></p>
+                   </div>
+                   <div className="flex gap-2 w-full md:w-auto">
+                      <Button variant="secondary" className="flex-1 md:flex-none text-xs" onClick={() => {
+                          setCompany(quote.company);
+                          setClient(quote.client);
+                          setItems(quote.items);
+                          setDiscount(quote.discount || 0);
+                          setObservations(quote.observations);
+                          setQuoteNumber(quote.number);
+                          setSelectedQuote(quote);
+                          setStep(Step.PREVIEW);
+                          setView('create_quote');
+                      }}>
+                         <FileText size={16} className="mr-1"/> Abrir PDF
+                      </Button>
+                      <button onClick={() => {
+                          if(confirm("Excluir este orçamento?")) {
+                              db.deleteQuote(currentUser!, quote.id);
+                              setHistoryList(db.getQuotes(currentUser!));
+                          }
+                      }} className="bg-red-50 text-red-500 p-3 rounded hover:bg-red-100">
+                          <Trash2 size={16} />
+                      </button>
+                   </div>
+                </div>
+             ))
+          )}
+       </div>
+    </div>
+  );
 
-    // @ts-ignore
-    if (window.html2pdf) {
-      try {
-        // @ts-ignore
-        await window.html2pdf().set(opt).from(element).save();
-      } catch (error) {
-        console.error("Erro ao gerar PDF", error);
-        alert("Erro ao gerar o PDF. Tente novamente.");
-      }
-    } else {
-      window.print(); 
-    }
-    setIsGenerating(false);
-  };
-
-  const handleWhatsApp = async () => {
-    setIsGenerating(true);
-    const statusText = document.getElementById('wa-btn-text');
-    if(statusText) statusText.innerText = "Gerando PDF...";
-
-    const element = document.getElementById('quote-content');
-    const opt = getPdfOptions();
-    
-    try {
-      // @ts-ignore
-      if (!window.html2pdf) {
-        throw new Error("Biblioteca PDF não carregada");
-      }
-
-      // 1. Gerar PDF Blob
-      // @ts-ignore
-      const worker = window.html2pdf().set(opt).from(element).toPdf();
-      const pdfBlob = await worker.output('blob');
-      const file = new File([pdfBlob], opt.filename, { type: 'application/pdf' });
-
-      // Dados para compartilhamento
-      const shareData = {
-        files: [file],
-        title: `Orçamento ${quoteNumber}`,
-        text: `Orçamento para ${client.name}`
+  // 3. WIZARD VIEW (Simplified logic from previous step, integrated here)
+  const renderWizard = () => {
+    // Aqui usamos os componentes que já existiam, mas encapsulados
+    if (step === Step.PREVIEW) {
+      const quoteData = selectedQuote || {
+        number: quoteNumber,
+        date: formatDate(new Date()),
+        createdBy,
+        company,
+        client,
+        items,
+        observations,
+        discount
       };
-
-      // 2. Tentar API Nativa (Mobile)
-      // Verifica se o navegador suporta compartilhamento de arquivos
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        try {
-          if(statusText) statusText.innerText = "Abrindo WhatsApp...";
-          await navigator.share(shareData);
-          setIsGenerating(false);
-          if(statusText) statusText.innerText = "Enviar via WhatsApp";
-          return; // Sucesso
-        } catch (shareError) {
-          if ((shareError as Error).name !== 'AbortError') {
-             console.warn("Falha no share nativo, tentando fallback...", shareError);
-          } else {
-             // Usuário cancelou
-             setIsGenerating(false);
-             if(statusText) statusText.innerText = "Enviar via WhatsApp";
-             return; 
-          }
-        }
-      }
-
-      // 3. Fallback (Desktop ou Android antigo)
-      // Baixa o arquivo e abre o link
-      if(statusText) statusText.innerText = "Baixando...";
       
-      const url = URL.createObjectURL(pdfBlob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = opt.filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      
-      const msg = `Olá! Segue o orçamento Nº ${quoteNumber} em anexo.`;
-      const waLink = `https://wa.me/?text=${encodeURIComponent(msg)}`;
-      
-      // Pequeno delay para garantir que o download iniciou
-      setTimeout(() => {
-         window.open(waLink, '_blank');
-         alert("⚠️ MODO DE COMPATIBILIDADE\n\n1. O PDF foi salvo no seu dispositivo.\n2. O WhatsApp foi aberto.\n3. Anexe o arquivo PDF manualmente na conversa.");
-      }, 800);
-
-    } catch (error) {
-      console.error("Erro fatal:", error);
-      alert("Não foi possível gerar o arquivo para envio. Tente a opção 'Baixar PDF'.");
-    } finally {
-      setIsGenerating(false);
-      if(statusText) statusText.innerText = "Enviar via WhatsApp";
-    }
-  };
-
-  // Compile final data
-  const quoteData: QuoteData = {
-    number: quoteNumber,
-    date: formatDate(new Date()),
-    createdBy,
-    company,
-    client,
-    items,
-    observations,
-    discount // Added to quote data
-  };
-
-  // --- Render Steps ---
-
-  const renderCompanyStep = () => (
-    <div className="space-y-4 animate-fade-in">
-      <h2 className="text-xl font-bold text-brand-blue flex items-center mb-4">
-        <Building2 className="mr-2" /> Dados da Empresa
-      </h2>
-      
-      {/* Upload de Logo */}
-      <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm mb-4">
-        <span className="block text-sm font-medium text-gray-700 mb-2">Logo da Empresa (Opcional)</span>
-        <div className="flex items-center gap-4">
-           <input 
-              type="file" 
-              ref={fileInputRef} 
-              className="hidden" 
-              accept="image/*" 
-              onChange={handleLogoUpload}
-           />
+      return (
+        <div className="min-h-screen bg-gray-200 flex flex-col items-center pt-16 pb-32">
+           <div className="fixed top-0 left-0 right-0 bg-white shadow z-50 p-3 flex items-center justify-between no-print">
+              <button onClick={() => setView('dashboard')} className="flex items-center text-brand-blue font-bold">
+                 <ArrowLeft size={20} className="mr-1"/> Voltar ao Início
+              </button>
+              <span className="font-bold text-gray-700">Visualização</span>
+              <div className="w-20"></div>
+           </div>
            
-           {company.logo ? (
-             <div className="relative">
-                <img src={company.logo} alt="Logo" className="w-20 h-20 object-contain border rounded bg-gray-50" />
-                <button 
-                  onClick={removeLogo}
-                  className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600"
-                >
-                  <X size={12} />
-                </button>
+           <div className="bg-white shadow-xl print:shadow-none" style={{ width: '210mm' }}>
+             <div id="quote-content">
+               <QuoteTemplate data={quoteData} />
              </div>
-           ) : (
-             <div className="w-20 h-20 bg-gray-100 rounded border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400">
-                <ImagePlus size={24} />
-             </div>
-           )}
+           </div>
 
-           <Button 
-             variant="secondary" 
-             className="text-sm py-2"
-             onClick={() => fileInputRef.current?.click()}
-           >
-             {company.logo ? "Trocar Imagem" : "Enviar Logo"}
+           <div className="fixed bottom-0 left-0 right-0 bg-white border-t p-4 flex gap-3 justify-center shadow-2xl z-50 no-print">
+               <PDFActionButtons quoteNumber={quoteData.number} clientName={quoteData.client.name} />
+           </div>
+        </div>
+      );
+    }
+    
+    // Passos de Edição
+    return (
+      <div className="pb-24 pt-4">
+        <div className="max-w-2xl mx-auto p-4 bg-white rounded-lg shadow-sm mb-4">
+            <WizardSteps currentStep={step} />
+        </div>
+        
+        <div className="max-w-2xl mx-auto p-4">
+           {step === Step.COMPANY && <CompanyStep company={company} setCompany={setCompany} createdBy={createdBy} setCreatedBy={setCreatedBy} />}
+           {step === Step.CLIENT && <ClientStep client={client} setClient={setClient} />}
+           {step === Step.ITEMS && <ItemsStep 
+               items={items} setItems={setItems} 
+               discount={discount} setDiscount={setDiscount}
+               observations={observations} setObservations={setObservations}
+               currentUser={currentUser!}
+               setIsCatalogOpen={setIsCatalogOpen}
+               catalogList={catalogList}
+           />}
+        </div>
+
+        <div className="fixed bottom-0 left-0 right-0 bg-white border-t p-4 flex justify-between max-w-2xl mx-auto w-full z-10">
+           <Button variant="secondary" onClick={() => step === Step.COMPANY ? setView('dashboard') : setStep(step - 1)}>
+             <ChevronLeft className="mr-1"/> Voltar
+           </Button>
+           <Button onClick={handleNextStep}>
+             {step === Step.ITEMS ? "Finalizar e Salvar" : "Próximo"} <ChevronRight className="ml-1"/>
            </Button>
         </div>
       </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Input label="Nome da Empresa" value={company.name} onChange={e => setCompany({...company, name: e.target.value})} />
-        <Input label="CNPJ" value={company.cnpj} onChange={e => setCompany({...company, cnpj: e.target.value})} />
-        <Input label="Telefone" value={company.phone} onChange={e => setCompany({...company, phone: e.target.value})} />
-        <Input label="Cidade" value={company.city} onChange={e => setCompany({...company, city: e.target.value})} />
-        <Input label="UF" value={company.uf} onChange={e => setCompany({...company, uf: e.target.value})} />
-        <Input label="Endereço" className="md:col-span-2" value={company.address} onChange={e => setCompany({...company, address: e.target.value})} />
-        <Input label="Criado por (Seu Nome)" className="md:col-span-2" value={createdBy} onChange={e => setCreatedBy(e.target.value)} />
-      </div>
-    </div>
-  );
-
-  const renderClientStep = () => (
-    <div className="space-y-4 animate-fade-in">
-      <h2 className="text-xl font-bold text-brand-blue flex items-center mb-4">
-        <User className="mr-2" /> Dados do Cliente
-      </h2>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Input label="Nome Completo *" value={client.name} onChange={e => setClient({...client, name: e.target.value})} />
-        <Input label="Telefone/Celular *" value={client.mobile} onChange={e => setClient({...client, mobile: e.target.value})} />
-        <Input label="CPF/CNPJ" value={client.cpfCnpj} onChange={e => setClient({...client, cpfCnpj: e.target.value})} />
-        <Input label="Email" type="email" value={client.email} onChange={e => setClient({...client, email: e.target.value})} />
-        
-        {/* CEP com Busca Automática */}
-        <div className="relative">
-           <Input 
-             label="CEP" 
-             value={client.zip} 
-             onChange={handleCepChange} 
-             placeholder="00000-000"
-             maxLength={9}
-           />
-           {isLoadingCep && (
-             <div className="absolute right-3 top-8 text-brand-blue">
-               <Loader2 className="animate-spin" size={18} />
-             </div>
-           )}
-        </div>
-
-        <Input label="Cidade" value={client.city} onChange={e => setClient({...client, city: e.target.value})} />
-        <Input label="Endereço" className="md:col-span-2" value={client.address} onChange={e => setClient({...client, address: e.target.value})} />
-        <div className="grid grid-cols-2 gap-4 md:col-span-2">
-            <Input label="Bairro" value={client.neighborhood} onChange={e => setClient({...client, neighborhood: e.target.value})} />
-            <Input label="Estado" value={client.state} onChange={e => setClient({...client, state: e.target.value})} />
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderItemsStep = () => (
-    <div className="space-y-4 animate-fade-in">
-      <div className="flex justify-between items-center mb-4">
-        <h2 className="text-xl font-bold text-brand-blue flex items-center">
-          <ShoppingCart className="mr-2" /> Produtos
-        </h2>
-      </div>
-
-      {/* Button to open catalog */}
-      <Button 
-        variant="secondary" 
-        onClick={() => setIsCatalogOpen(true)}
-        className="w-full py-3 mb-2 border-2 border-dashed border-blue-200 bg-blue-50 text-brand-blue hover:bg-blue-100"
-        icon={<Search size={20} />}
-      >
-        Buscar Item Salvo
-      </Button>
-
-      {/* Datalist for autocomplete */}
-      <datalist id="catalog-list">
-        {catalog.map(item => (
-          <option key={item.id} value={item.description} />
-        ))}
-      </datalist>
-      
-      {/* Form Card */}
-      <div className="bg-white p-4 rounded-lg shadow-md border border-gray-200">
-        <h3 className="text-sm font-semibold text-gray-500 mb-3 uppercase tracking-wide">
-            {isEditingItem ? "Editar Item" : "Novo Item"}
-        </h3>
-        
-        <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-3">
-          <Input 
-            label="Código" 
-            className="col-span-1 md:col-span-1" 
-            value={currentItem.code} 
-            onChange={handleCodeChange}
-            placeholder="Cod..." 
-          />
-          <Input 
-            label="Descrição *" 
-            className="col-span-2 md:col-span-3" 
-            value={currentItem.description} 
-            onChange={handleDescriptionChange}
-            list="catalog-list" // Connects to datalist
-            placeholder="Digite para buscar..."
-          />
-          <Input 
-            label="Qtd" 
-            type="number" 
-            className="col-span-1 md:col-span-1" 
-            value={currentItem.quantity} 
-            onChange={e => setCurrentItem({...currentItem, quantity: Number(e.target.value)})} 
-          />
-          <Input 
-            label="Valor Unit." 
-            type="number" 
-            step="0.01" 
-            className="col-span-2 md:col-span-1" 
-            // Se for 0, mostra vazio para não ter que apagar o zero
-            value={currentItem.unitPrice === 0 ? '' : currentItem.unitPrice} 
-            onChange={e => setCurrentItem({...currentItem, unitPrice: Number(e.target.value)})} 
-          />
-        </div>
-        
-        {/* Checkbox Save to Catalog */}
-        {!isEditingItem && (
-          <div className="flex items-center mb-3">
-             <input 
-               id="save-catalog"
-               type="checkbox" 
-               className="w-4 h-4 text-brand-blue rounded focus:ring-brand-blue"
-               checked={saveToCatalog}
-               onChange={(e) => setSaveToCatalog(e.target.checked)}
-             />
-             <label htmlFor="save-catalog" className="ml-2 text-sm text-gray-600 flex items-center cursor-pointer">
-                <Save size={14} className="mr-1"/> Salvar este item no meu catálogo
-             </label>
-          </div>
-        )}
-
-        <div className="flex justify-end gap-2">
-             {isEditingItem && (
-                 <Button variant="secondary" onClick={() => { setIsEditingItem(null); setCurrentItem({ code: "", description: "", quantity: 1, unitPrice: 0 }); }}>
-                    Cancelar
-                 </Button>
-             )}
-             <Button onClick={addItem} disabled={!currentItem.description || !currentItem.unitPrice}>
-                {isEditingItem ? <><Edit2 size={16} className="mr-2"/> Atualizar</> : <><Plus size={16} className="mr-2"/> Adicionar</>}
-             </Button>
-        </div>
-      </div>
-
-      {/* List */}
-      <div className="mt-6">
-        <h3 className="font-bold text-gray-700 mb-2">Itens Adicionados ({items.length})</h3>
-        {items.length === 0 ? (
-          <p className="text-gray-500 text-center py-8 bg-gray-50 rounded-lg border border-dashed border-gray-300">Nenhum item adicionado ainda.</p>
-        ) : (
-          <div className="space-y-2">
-            {items.map(item => (
-              <div key={item.id} className="bg-white p-3 rounded shadow-sm border border-gray-100 flex justify-between items-center">
-                <div className="flex-1">
-                  <p className="font-bold text-gray-800">{item.description}</p>
-                  <p className="text-sm text-gray-500">
-                    {item.quantity} x R$ {item.unitPrice.toFixed(2)} = <span className="text-brand-blue font-bold">R$ {(item.quantity * item.unitPrice).toFixed(2)}</span>
-                  </p>
-                </div>
-                <div className="flex gap-2">
-                  <button onClick={() => editItem(item)} className="p-2 text-blue-600 hover:bg-blue-50 rounded"><Edit2 size={18} /></button>
-                  <button onClick={() => deleteItem(item.id)} className="p-2 text-red-600 hover:bg-red-50 rounded"><Trash2 size={18} /></button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Discount Input */}
-      {items.length > 0 && (
-         <div className="mt-6 bg-white p-4 rounded-lg shadow-sm border border-green-100">
-            <div className="flex items-center gap-2 mb-2 text-green-700 font-bold">
-               <DollarSign size={20} />
-               Desconto no Total
-            </div>
-            <Input 
-              label="Valor do Desconto (R$)" 
-              type="number"
-              step="0.01"
-              value={discount === 0 ? '' : discount} 
-              onChange={e => setDiscount(Number(e.target.value))}
-              placeholder="0,00"
-            />
-         </div>
-      )}
-
-      <div className="mt-6">
-          <label className="block text-sm font-medium text-gray-700 mb-1">Observações Gerais</label>
-          <textarea 
-            className="w-full border border-gray-300 rounded-md p-2 h-24 focus:ring-brand-blue focus:border-brand-blue"
-            placeholder="Ex: Validade do orçamento 15 dias, pagamento 50% entrada..."
-            value={observations}
-            onChange={(e) => setObservations(e.target.value)}
-          />
-      </div>
-    </div>
-  );
-
-  // --- Main Render Logic ---
-
-  if (!currentUser) {
-    return <AuthScreen onLogin={handleLogin} />;
-  }
-
-  if (step === Step.PREVIEW) {
-    return (
-      <div className="min-h-screen bg-gray-200 flex flex-col items-center">
-        {/* Mobile Toolbar */}
-        <div className="fixed top-0 left-0 right-0 bg-white shadow-md z-50 p-3 flex justify-between items-center no-print">
-            <button onClick={() => setStep(Step.ITEMS)} className="text-gray-600 flex items-center font-medium">
-                <ChevronLeft size={20} /> Editar
-            </button>
-            <span className="font-bold text-gray-800">Prévia do Orçamento</span>
-            <div className="w-16"></div>
-        </div>
-
-        {/* Preview Area */}
-        <div className="mt-16 mb-32 w-full flex justify-center p-4 overflow-auto">
-            {/* Wrapper visual da folha A4 */}
-            <div className="bg-white shadow-2xl print:shadow-none" style={{ width: '210mm' }}>
-                <div id="quote-content">
-                  <QuoteTemplate data={quoteData} />
-                </div>
-            </div>
-        </div>
-
-        {/* Bottom Actions */}
-        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 z-50 shadow-lg no-print">
-            <div className="flex flex-col gap-3 max-w-lg mx-auto">
-              <Button variant="success" onClick={handleWhatsApp} disabled={isGenerating} fullWidth>
-                  {isGenerating ? <Loader2 className="animate-spin mr-2" /> : <Share2 className="mr-2" size={20} />}
-                  <span id="wa-btn-text">{isGenerating ? "Processando..." : "Enviar via WhatsApp"}</span>
-              </Button>
-              <Button variant="primary" onClick={handleSavePDF} disabled={isGenerating} fullWidth className="bg-gray-800 hover:bg-gray-900">
-                  {isGenerating ? <Loader2 className="animate-spin mr-2" /> : <Download className="mr-2" size={20} />}
-                  {isGenerating ? "Gerando..." : "Baixar PDF"}
-              </Button>
-            </div>
-            <p className="text-[10px] text-center text-gray-400 mt-2">
-              Nota: O envio direto funciona melhor em celulares Android/iOS.
-            </p>
-        </div>
-      </div>
     );
-  }
+  };
+
+  // --- COMPONENTES AUXILIARES DO WIZARD PARA ORGANIZAÇÃO ---
+  // (Separados aqui para não poluir o App principal)
+  
+  const PDFActionButtons = ({quoteNumber, clientName}: {quoteNumber: string, clientName: string}) => {
+      const [loading, setLoading] = useState(false);
+      
+      const getPdfOptions = () => ({
+        margin: 0,
+        filename: `Orcamento_${quoteNumber}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true, logging: false },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+      });
+
+      const handleShare = async () => {
+         setLoading(true);
+         const element = document.getElementById('quote-content');
+         const opt = getPdfOptions();
+         try {
+             // @ts-ignore
+             const worker = window.html2pdf().set(opt).from(element).toPdf();
+             const blob = await worker.output('blob');
+             const file = new File([blob], opt.filename, { type: 'application/pdf' });
+             if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                 await navigator.share({ files: [file], title: "Orçamento", text: `Orçamento para ${clientName}` });
+             } else {
+                 const url = URL.createObjectURL(blob);
+                 const a = document.createElement('a');
+                 a.href = url;
+                 a.download = opt.filename;
+                 document.body.appendChild(a);
+                 a.click();
+                 alert("PDF Baixado. Compartilhe manualmente pelo WhatsApp.");
+             }
+         } catch(e) { alert("Erro ao gerar PDF"); }
+         setLoading(false);
+      };
+
+      const handleDownload = async () => {
+          setLoading(true);
+          const element = document.getElementById('quote-content');
+          // @ts-ignore
+          await window.html2pdf().set(getPdfOptions()).from(element).save();
+          setLoading(false);
+      };
+
+      return (
+          <>
+             <Button variant="success" onClick={handleShare} disabled={loading} className="w-full md:w-auto">
+                {loading ? <Loader2 className="animate-spin"/> : <Share2 className="mr-2"/>} WhatsApp
+             </Button>
+             <Button variant="primary" onClick={handleDownload} disabled={loading} className="w-full md:w-auto bg-gray-800">
+                <Download className="mr-2"/> Baixar PDF
+             </Button>
+          </>
+      )
+  };
+
+  if (!currentUser) return <AuthScreen onLogin={handleLogin} />;
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
-      {/* Validation Alert Toast */}
-      {validationError && (
-        <div className="fixed top-16 left-0 right-0 mx-auto w-full max-w-md px-4 z-50 animate-bounce">
-          <div className="bg-red-500 text-white px-4 py-3 rounded-lg shadow-xl flex items-center justify-center">
-            <AlertTriangle className="mr-2" size={24} />
-            <span className="font-bold text-sm">{validationError}</span>
+    <div className="min-h-screen bg-gray-50 font-sans">
+      {/* Navbar Global */}
+      {view !== 'create_quote' && (
+          <header className="bg-brand-blue text-white p-4 shadow-md sticky top-0 z-20">
+            <div className="flex justify-between items-center max-w-4xl mx-auto">
+               <h1 className="font-bold flex items-center gap-2"><LayoutDashboard/> Orçamentos WA</h1>
+               <button onClick={handleLogout} className="text-xs bg-blue-900 px-3 py-1 rounded hover:bg-blue-950 flex gap-1 items-center">
+                  <LogOut size={14}/> Sair
+               </button>
+            </div>
+          </header>
+      )}
+
+      {/* Validation Toast */}
+      {validationAlert && (
+        <div className="fixed top-20 left-0 right-0 mx-auto w-full max-w-sm px-4 z-[60] animate-bounce">
+          <div className="bg-red-500 text-white px-4 py-3 rounded-lg shadow-xl flex items-center justify-center gap-2">
+            <AlertTriangle size={20} />
+            <span className="font-bold text-sm">{validationAlert}</span>
           </div>
         </div>
       )}
 
-      {/* Catalog Modal */}
-      <CatalogModal 
-        isOpen={isCatalogOpen} 
-        onClose={() => setIsCatalogOpen(false)} 
-        catalog={catalog}
-        onDelete={deleteFromCatalog}
-        onSelect={selectFromCatalog}
-        onUpdate={updateCatalogItem}
-      />
+      <CatalogModal isOpen={isCatalogOpen} onClose={() => setIsCatalogOpen(false)} email={currentUser} onSelect={() => {}} />
 
-      {/* Header */}
-      <header className="bg-brand-blue text-white p-4 shadow-lg sticky top-0 z-10">
-        <div className="flex justify-between items-center mb-2">
-           <h1 className="text-lg font-bold flex items-center">
-             <FileText className="mr-2" /> Orçamentos WA
-           </h1>
-           <div className="flex items-center gap-2">
-              <span className="text-[10px] bg-blue-800 px-2 py-1 rounded hidden md:inline-block">{currentUser}</span>
-              <button onClick={handleLogout} className="text-xs flex items-center bg-blue-900 hover:bg-blue-950 px-2 py-1 rounded transition-colors">
-                <LogOut size={14} className="mr-1"/> Sair
-              </button>
-           </div>
-        </div>
-
-        {/* Stepper */}
-        <div className="flex justify-between items-center mt-4 px-4 max-w-md mx-auto text-xs opacity-90">
-            <div className={`flex flex-col items-center ${step >= Step.COMPANY ? 'text-white' : 'text-blue-300'}`}>
-                <div className={`w-6 h-6 rounded-full flex items-center justify-center mb-1 ${step >= Step.COMPANY ? 'bg-white text-brand-blue font-bold' : 'border border-blue-300'}`}>1</div>
-                Empresa
-            </div>
-            <div className="h-[1px] bg-blue-400 flex-1 mx-2"></div>
-            <div className={`flex flex-col items-center ${step >= Step.CLIENT ? 'text-white' : 'text-blue-300'}`}>
-                <div className={`w-6 h-6 rounded-full flex items-center justify-center mb-1 ${step >= Step.CLIENT ? 'bg-white text-brand-blue font-bold' : 'border border-blue-300'}`}>2</div>
-                Cliente
-            </div>
-            <div className="h-[1px] bg-blue-400 flex-1 mx-2"></div>
-            <div className={`flex flex-col items-center ${step >= Step.ITEMS ? 'text-white' : 'text-blue-300'}`}>
-                <div className={`w-6 h-6 rounded-full flex items-center justify-center mb-1 ${step >= Step.ITEMS ? 'bg-white text-brand-blue font-bold' : 'border border-blue-300'}`}>3</div>
-                Itens
-            </div>
-        </div>
-      </header>
-
-      {/* Main Content */}
-      <main className="flex-1 p-4 pb-24 max-w-2xl mx-auto w-full">
-        {step === Step.COMPANY && renderCompanyStep()}
-        {step === Step.CLIENT && renderClientStep()}
-        {step === Step.ITEMS && renderItemsStep()}
+      <main className="flex-1 w-full">
+         {view === 'dashboard' && renderDashboard()}
+         {view === 'history' && renderHistory()}
+         {view === 'create_quote' && renderWizard()}
       </main>
-
-      {/* Footer Navigation */}
-      <footer className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 flex justify-between max-w-2xl mx-auto w-full z-10">
-        <Button 
-            variant="secondary" 
-            onClick={handleBack} 
-            disabled={step === Step.COMPANY}
-            className={step === Step.COMPANY ? 'invisible' : ''}
-        >
-            <ChevronLeft className="mr-1" size={20}/> Voltar
-        </Button>
-        
-        <Button onClick={handleNext}>
-            {step === Step.ITEMS ? "Gerar Orçamento" : "Próximo"} <ChevronRight className="ml-1" size={20}/>
-        </Button>
-      </footer>
     </div>
   );
+}
+
+// --- SUB-COMPONENTS FOR WIZARD STEPS ---
+
+const WizardSteps = ({currentStep}: {currentStep: number}) => (
+    <div className="flex justify-between items-center text-xs text-gray-500">
+        <div className={`flex flex-col items-center ${currentStep >= 1 ? 'text-brand-blue font-bold' : ''}`}>
+           <div className={`w-8 h-8 rounded-full flex items-center justify-center mb-1 border-2 ${currentStep >= 1 ? 'border-brand-blue bg-blue-50' : 'border-gray-200'}`}>1</div>
+           Empresa
+        </div>
+        <div className="h-[2px] bg-gray-200 flex-1 mx-2"></div>
+        <div className={`flex flex-col items-center ${currentStep >= 2 ? 'text-brand-blue font-bold' : ''}`}>
+           <div className={`w-8 h-8 rounded-full flex items-center justify-center mb-1 border-2 ${currentStep >= 2 ? 'border-brand-blue bg-blue-50' : 'border-gray-200'}`}>2</div>
+           Cliente
+        </div>
+        <div className="h-[2px] bg-gray-200 flex-1 mx-2"></div>
+        <div className={`flex flex-col items-center ${currentStep >= 3 ? 'text-brand-blue font-bold' : ''}`}>
+           <div className={`w-8 h-8 rounded-full flex items-center justify-center mb-1 border-2 ${currentStep >= 3 ? 'border-brand-blue bg-blue-50' : 'border-gray-200'}`}>3</div>
+           Itens
+        </div>
+    </div>
+);
+
+const CompanyStep = ({company, setCompany, createdBy, setCreatedBy}: any) => {
+    const fileRef = useRef<HTMLInputElement>(null);
+    const handleLogo = (e: any) => {
+        const file = e.target.files[0];
+        if(file) {
+            const reader = new FileReader();
+            reader.onloadend = () => setCompany({...company, logo: reader.result});
+            reader.readAsDataURL(file);
+        }
+    }
+    return (
+        <div className="space-y-4 animate-fade-in">
+           <h2 className="text-xl font-bold text-brand-blue flex gap-2"><Building2/> Dados da Empresa</h2>
+           
+           <div className="bg-gray-50 p-4 rounded border flex items-center gap-4">
+              {company.logo ? (
+                  <div className="relative">
+                      <img src={company.logo} className="w-16 h-16 object-contain bg-white rounded border"/>
+                      <button onClick={() => setCompany({...company, logo: undefined})} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1"><X size={12}/></button>
+                  </div>
+              ) : (
+                  <div className="w-16 h-16 bg-gray-200 rounded flex items-center justify-center text-gray-400"><ImagePlus/></div>
+              )}
+              <div>
+                  <input type="file" ref={fileRef} className="hidden" accept="image/*" onChange={handleLogo}/>
+                  <Button variant="secondary" onClick={() => fileRef.current?.click()} className="text-xs py-2">Alterar Logo</Button>
+              </div>
+           </div>
+
+           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+               <Input label="Nome da Empresa" value={company.name} onChange={e => setCompany({...company, name: e.target.value})} />
+               <Input label="CNPJ" value={company.cnpj} onChange={e => setCompany({...company, cnpj: e.target.value})} />
+               <Input label="Telefone" value={company.phone} onChange={e => setCompany({...company, phone: e.target.value})} />
+               <Input label="Cidade" value={company.city} onChange={e => setCompany({...company, city: e.target.value})} />
+               <Input label="UF" value={company.uf} onChange={e => setCompany({...company, uf: e.target.value})} />
+               <Input label="Seu Nome (Responsável)" className="md:col-span-2" value={createdBy} onChange={e => setCreatedBy(e.target.value)} />
+               <Input label="Endereço Completo" className="md:col-span-2" value={company.address} onChange={e => setCompany({...company, address: e.target.value})} />
+           </div>
+        </div>
+    )
+}
+
+const ClientStep = ({client, setClient}: any) => {
+    const [loadingCep, setLoadingCep] = useState(false);
+    const handleCep = async (e: any) => {
+        const val = e.target.value;
+        setClient({...client, zip: val});
+        if(val.replace(/\D/g, '').length === 8) {
+            setLoadingCep(true);
+            try {
+                const res = await fetch(`https://viacep.com.br/ws/${val}/json/`);
+                const data = await res.json();
+                if(!data.erro) setClient(prev => ({...prev, address: data.logradouro, neighborhood: data.bairro, city: data.localidade, state: data.uf, zip: val}));
+            } catch(e) {}
+            setLoadingCep(false);
+        }
+    }
+    return (
+        <div className="space-y-4 animate-fade-in">
+            <h2 className="text-xl font-bold text-brand-blue flex gap-2"><User/> Dados do Cliente</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+               <Input label="Nome Completo *" value={client.name} onChange={e => setClient({...client, name: e.target.value})} />
+               <Input label="Telefone/Zap *" value={client.mobile} onChange={e => setClient({...client, mobile: e.target.value})} />
+               <div className="relative">
+                   <Input label="CEP" value={client.zip} onChange={handleCep} maxLength={9} />
+                   {loadingCep && <Loader2 className="absolute right-3 top-9 animate-spin text-blue-500" size={16}/>}
+               </div>
+               <Input label="CPF/CNPJ" value={client.cpfCnpj} onChange={e => setClient({...client, cpfCnpj: e.target.value})} />
+               <Input label="Endereço" className="md:col-span-2" value={client.address} onChange={e => setClient({...client, address: e.target.value})} />
+               <Input label="Bairro" value={client.neighborhood} onChange={e => setClient({...client, neighborhood: e.target.value})} />
+               <Input label="Cidade/UF" value={`${client.city} ${client.state}`} onChange={e => setClient({...client, city: e.target.value})} />
+            </div>
+        </div>
+    )
+}
+
+const ItemsStep = ({items, setItems, discount, setDiscount, observations, setObservations, currentUser, setIsCatalogOpen, catalogList}: any) => {
+    const [form, setForm] = useState<Partial<ProductItem>>({quantity: 1, unitPrice: 0, description: '', code: ''});
+    
+    // Auto complete handler
+    const handleDesc = (e: any) => {
+        const val = e.target.value;
+        setForm(prev => ({...prev, description: val}));
+        const found = catalogList.find((c: ProductItem) => c.description.toLowerCase() === val.toLowerCase());
+        if(found) setForm(prev => ({...prev, unitPrice: found.unitPrice, code: found.code}));
+    }
+
+    const addItem = () => {
+        if(!form.description || !form.unitPrice) return;
+        setItems([...items, {...form, id: Math.random().toString()}]);
+        
+        // Auto save to catalog logic check could go here if implemented checkbox again
+        // For now, simpler is better
+        
+        setForm({quantity: 1, unitPrice: 0, description: '', code: ''});
+    }
+
+    return (
+        <div className="space-y-4 animate-fade-in">
+            <h2 className="text-xl font-bold text-brand-blue flex gap-2"><ShoppingCart/> Itens e Valores</h2>
+            
+            <Button variant="secondary" onClick={() => setIsCatalogOpen(true)} className="w-full bg-blue-50 border-dashed border-2 border-blue-200 text-blue-700">
+                <Search size={16} className="mr-2"/> Abrir Catálogo Salvo
+            </Button>
+            
+            <datalist id="catalog-suggestions">
+                {catalogList.map((c: ProductItem) => <option key={c.id} value={c.description}/>)}
+            </datalist>
+
+            <div className="bg-white p-4 rounded shadow border grid grid-cols-6 gap-2">
+                <Input className="col-span-1" label="Cód" value={form.code} onChange={e => setForm({...form, code: e.target.value})}/>
+                <Input className="col-span-3" label="Descrição" list="catalog-suggestions" value={form.description} onChange={handleDesc} placeholder="Nome do item..."/>
+                <Input className="col-span-1" type="number" label="Qtd" value={form.quantity} onChange={e => setForm({...form, quantity: Number(e.target.value)})}/>
+                <Input className="col-span-1" type="number" label="Preço" value={form.unitPrice || ''} onChange={e => setForm({...form, unitPrice: Number(e.target.value)})}/>
+                <div className="col-span-6">
+                    <Button fullWidth onClick={addItem} disabled={!form.description}>Adicionar Item</Button>
+                </div>
+            </div>
+
+            <div className="space-y-2">
+                {items.map((item: ProductItem) => (
+                    <div key={item.id} className="bg-white p-3 rounded border flex justify-between items-center">
+                        <div>
+                            <p className="font-bold text-sm">{item.description}</p>
+                            <p className="text-xs text-gray-500">{item.quantity} x {formatCurrency(item.unitPrice)}</p>
+                        </div>
+                        <div className="flex gap-2 items-center">
+                            <span className="font-bold text-gray-700 mr-2">{formatCurrency(item.quantity * item.unitPrice)}</span>
+                            <button onClick={() => setItems(items.filter((i: any) => i.id !== item.id))} className="text-red-500 p-1"><Trash2 size={16}/></button>
+                        </div>
+                    </div>
+                ))}
+            </div>
+            
+            <div className="pt-4 border-t">
+                <Input label="Desconto (R$)" type="number" value={discount || ''} onChange={e => setDiscount(Number(e.target.value))}/>
+                <label className="text-sm font-bold text-gray-700">Observações</label>
+                <textarea className="w-full border p-2 rounded h-20" value={observations} onChange={e => setObservations(e.target.value)}></textarea>
+            </div>
+        </div>
+    )
 }
