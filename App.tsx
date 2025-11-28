@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { CompanyData, ClientData, ProductItem, QuoteData, SavedQuote } from './types';
 import { generateId, formatDate, formatCurrency } from './utils';
@@ -32,7 +33,10 @@ import {
   Settings,
   ArrowLeft,
   CheckSquare,
-  Square
+  Square,
+  KeyRound,
+  CalendarClock,
+  ShieldCheck
 } from 'lucide-react';
 
 // --- CONSTANTS & DEFAULTS ---
@@ -58,7 +62,8 @@ enum Step {
   PREVIEW = 4
 }
 
-type AppView = 'dashboard' | 'create_quote' | 'history' | 'settings';
+type AppView = 'access_check' | 'dashboard' | 'create_quote' | 'history' | 'settings';
+type AccessStatus = 'valid' | 'expired' | 'none';
 
 // --- SUB-COMPONENTS ---
 
@@ -155,59 +160,67 @@ const CatalogModal: React.FC<CatalogModalProps> = ({ isOpen, onClose, email, onS
   );
 };
 
-// 2. Auth Screen (Login)
-interface AuthScreenProps {
-  onLogin: (email: string) => void;
+// 2. Access Code Screen (Tela de Código)
+interface AccessCodeScreenProps {
+  onSuccess: () => void;
+  isExpiredMode?: boolean;
 }
 
-const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin }) => {
-  const [email, setEmail] = useState("");
-  const [accessKey, setAccessKey] = useState("");
+const AccessCodeScreen: React.FC<AccessCodeScreenProps> = ({ onSuccess, isExpiredMode = false }) => {
+  const [code, setCode] = useState("");
   const [error, setError] = useState("");
-  const [showKeyInput, setShowKeyInput] = useState(false);
-  const SYSTEM_ACCESS_KEY = "admin123"; 
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleActivation = (e: React.FormEvent) => {
     e.preventDefault();
-    setError("");
-    if (!email.trim() || !email.includes('@')) { setError("Email inválido"); return; }
+    if (!code.trim()) { setError("Digite um código."); return; }
     
-    const cleanEmail = email.toLowerCase().trim();
-    const authorizedUsers = JSON.parse(localStorage.getItem('saas_authorized_users') || '[]');
-    
-    if (authorizedUsers.includes(cleanEmail)) {
-      onLogin(cleanEmail);
+    const result = db.activateCode(code);
+    if (result.success) {
+      onSuccess();
     } else {
-      if (!showKeyInput) {
-        setShowKeyInput(true);
-        setError("Email novo. Insira a Chave de Acesso.");
-        return;
-      }
-      if (accessKey === SYSTEM_ACCESS_KEY) {
-        localStorage.setItem('saas_authorized_users', JSON.stringify([...authorizedUsers, cleanEmail]));
-        onLogin(cleanEmail);
-      } else {
-        setError("Chave incorreta.");
-      }
+      setError(result.message);
     }
   };
 
   return (
     <div className="min-h-screen bg-brand-blue flex items-center justify-center p-4">
-      <div className="bg-white rounded-lg shadow-2xl p-8 w-full max-w-md">
-        <div className="text-center mb-6">
-          <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <Lock className="text-brand-blue" size={32} />
-          </div>
-          <h1 className="text-2xl font-bold text-gray-800">Orçamentos WA</h1>
-          <p className="text-gray-500 text-sm">Sistema de Gestão</p>
+      <div className="bg-white rounded-lg shadow-2xl p-8 w-full max-w-md text-center">
+        <div className={`w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 ${isExpiredMode ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-brand-blue'}`}>
+          {isExpiredMode ? <Lock size={40} /> : <KeyRound size={40} />}
         </div>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <Input label="Email" value={email} onChange={e => {setEmail(e.target.value); setError("");}} placeholder="seu@email.com" />
-          {showKeyInput && <Input label="Chave de Acesso" type="password" value={accessKey} onChange={e => setAccessKey(e.target.value)} />}
+        
+        <h1 className="text-2xl font-bold text-gray-800 mb-2">
+          {isExpiredMode ? "Acesso Expirado" : "Código de Liberação"}
+        </h1>
+        
+        <p className="text-gray-600 mb-6 text-sm">
+          {isExpiredMode 
+            ? "O seu período de 30 dias encerrou. Insira um novo código para renovar o acesso." 
+            : "Insira seu código de acesso para liberar o aplicativo por 30 dias."}
+        </p>
+        
+        <form onSubmit={handleActivation} className="space-y-4">
+          <div className="text-left">
+             <Input 
+                label="Código de Acesso" 
+                value={code} 
+                onChange={e => {setCode(e.target.value.toUpperCase()); setError("");}} 
+                placeholder="EX: ABC1234"
+                className="text-center tracking-widest font-bold text-xl uppercase"
+                maxLength={10}
+              />
+          </div>
+          
           {error && <p className="text-red-500 text-sm font-bold bg-red-50 p-2 rounded">{error}</p>}
-          <Button type="submit" fullWidth>{showKeyInput ? "Cadastrar e Entrar" : "Entrar"}</Button>
+          
+          <Button type="submit" fullWidth className={isExpiredMode ? "bg-red-600 hover:bg-red-700" : ""}>
+            {isExpiredMode ? "Renovar Acesso" : "Ativar Acesso"}
+          </Button>
         </form>
+
+        <p className="mt-6 text-xs text-gray-400">
+           Suporte: (00) 0000-0000
+        </p>
       </div>
     </div>
   );
@@ -216,8 +229,10 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin }) => {
 // --- MAIN APP ---
 
 export default function App() {
-  const [currentUser, setCurrentUser] = useState<string | null>(null);
-  const [view, setView] = useState<AppView>('dashboard');
+  const [currentUser, setCurrentUser] = useState<string>(db.getCurrentUserId());
+  const [accessStatus, setAccessStatus] = useState<AccessStatus>('none');
+  const [daysLeft, setDaysLeft] = useState<number>(0);
+  const [view, setView] = useState<AppView>('access_check');
   
   // Create Quote State
   const [step, setStep] = useState<Step>(Step.COMPANY);
@@ -230,7 +245,6 @@ export default function App() {
   const [createdBy, setCreatedBy] = useState<string>("");
   
   // UI State
-  const [isLoading, setIsLoading] = useState(false);
   const [isCatalogOpen, setIsCatalogOpen] = useState(false);
   const [validationAlert, setValidationAlert] = useState<string | null>(null);
   
@@ -241,15 +255,25 @@ export default function App() {
   // Catalog State for autocomplete
   const [catalogList, setCatalogList] = useState<ProductItem[]>([]);
 
-  // Init
+  // 1. Verificação Inicial de Acesso
   useEffect(() => {
-    const savedUser = localStorage.getItem('saas_current_user');
-    if (savedUser) setCurrentUser(savedUser);
+    checkAccess();
   }, []);
+
+  const checkAccess = () => {
+    const { status, daysLeft } = db.checkAccessStatus();
+    setAccessStatus(status);
+    if (status === 'valid') {
+      setDaysLeft(daysLeft || 0);
+      setView('dashboard');
+    } else {
+      setView('access_check'); // Vai cair na tela de input ou expirado
+    }
+  };
 
   // Load User Data & Auto Save Company
   useEffect(() => {
-    if (currentUser) {
+    if (accessStatus === 'valid') {
       // First load
       if (company === DEFAULT_COMPANY_TEMPLATE) {
           const savedCompany = db.getCompany(currentUser);
@@ -260,18 +284,7 @@ export default function App() {
       }
       setCatalogList(db.getCatalog(currentUser));
     }
-  }, [currentUser, view, company]); // Add company to dependencies for auto-save
-
-  const handleLogin = (email: string) => {
-    localStorage.setItem('saas_current_user', email);
-    setCurrentUser(email);
-    setView('dashboard');
-  };
-
-  const handleLogout = () => {
-    localStorage.removeItem('saas_current_user');
-    setCurrentUser(null);
-  };
+  }, [accessStatus, view, company, currentUser]); 
 
   const startNewQuote = () => {
     setClient(INITIAL_CLIENT);
@@ -311,7 +324,7 @@ export default function App() {
         if (currentUser) db.saveCompany(currentUser, company);
         
         // SALVAR ORÇAMENTO NO HISTÓRICO AUTOMATICAMENTE
-        if (currentUser && !selectedQuote) { // Só salva se for novo, não se estiver vendo histórico
+        if (currentUser && !selectedQuote) { 
             const quoteToSave: QuoteData = {
                 number: quoteNumber,
                 date: formatDate(new Date()),
@@ -335,9 +348,14 @@ export default function App() {
   // 1. DASHBOARD VIEW
   const renderDashboard = () => (
     <div className="p-6 max-w-4xl mx-auto animate-fade-in">
-       <div className="mb-8">
-         <h2 className="text-2xl font-bold text-gray-800">Olá, Usuário</h2>
-         <p className="text-gray-500">{currentUser}</p>
+       <div className="mb-8 flex justify-between items-end">
+         <div>
+            <h2 className="text-2xl font-bold text-gray-800">Olá, Usuário</h2>
+            <p className="text-gray-500">ID: {currentUser}</p>
+         </div>
+         <div className={`text-xs px-3 py-1 rounded-full flex items-center font-bold ${daysLeft < 5 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
+            <CalendarClock size={14} className="mr-1"/> {daysLeft} dias restantes
+         </div>
        </div>
 
        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -455,9 +473,8 @@ export default function App() {
     </div>
   );
 
-  // 3. WIZARD VIEW (Simplified logic from previous step, integrated here)
+  // 3. WIZARD VIEW (Integrated Logic)
   const renderWizard = () => {
-    // Aqui usamos os componentes que já existiam, mas encapsulados
     if (step === Step.PREVIEW) {
       const quoteData = selectedQuote || {
         number: quoteNumber,
@@ -480,7 +497,7 @@ export default function App() {
               <div className="w-20"></div>
            </div>
            
-           {/* Container Responsivo com Zoom para Mobile (CORREÇÃO APLICADA) */}
+           {/* Container Responsivo com Zoom para Mobile */}
            <div className="w-full overflow-hidden flex justify-center my-4">
                <div className="origin-top transform scale-[0.42] sm:scale-75 md:scale-100 transition-transform duration-200 bg-white shadow-2xl print:shadow-none print:transform-none" style={{ width: '210mm', minHeight: '297mm' }}>
                  <div id="quote-content" className="h-full">
@@ -496,7 +513,6 @@ export default function App() {
       );
     }
     
-    // Passos de Edição
     return (
       <div className="pb-24 pt-4">
         <div className="max-w-2xl mx-auto p-4 bg-white rounded-lg shadow-sm mb-4">
@@ -529,8 +545,7 @@ export default function App() {
     );
   };
 
-  // --- COMPONENTES AUXILIARES DO WIZARD PARA ORGANIZAÇÃO ---
-  // (Separados aqui para não poluir o App principal)
+  // --- COMPONENTES AUXILIARES DO WIZARD ---
   
   const PDFActionButtons = ({quoteNumber, clientName}: {quoteNumber: string, clientName: string}) => {
       const [loading, setLoading] = useState(false);
@@ -587,8 +602,14 @@ export default function App() {
       )
   };
 
-  if (!currentUser) return <AuthScreen onLogin={handleLogin} />;
+  // --- RENDERIZAÇÃO PRINCIPAL (CONDICIONAL) ---
 
+  // 1. Se não tiver acesso ou expirado
+  if (accessStatus === 'none' || accessStatus === 'expired') {
+    return <AccessCodeScreen isExpiredMode={accessStatus === 'expired'} onSuccess={checkAccess} />;
+  }
+
+  // 2. App Principal
   return (
     <div className="min-h-screen bg-gray-50 font-sans">
       {/* Navbar Global */}
@@ -596,9 +617,10 @@ export default function App() {
           <header className="bg-brand-blue text-white p-4 shadow-md sticky top-0 z-20">
             <div className="flex justify-between items-center max-w-4xl mx-auto">
                <h1 className="font-bold flex items-center gap-2"><LayoutDashboard/> Orçamentos WA</h1>
-               <button onClick={handleLogout} className="text-xs bg-blue-900 px-3 py-1 rounded hover:bg-blue-950 flex gap-1 items-center">
-                  <LogOut size={14}/> Sair
-               </button>
+               <div className="flex items-center gap-2">
+                 <ShieldCheck size={18} className="text-green-400"/>
+                 <span className="text-xs text-blue-200">Acesso Seguro</span>
+               </div>
             </div>
           </header>
       )}

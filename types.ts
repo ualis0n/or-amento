@@ -41,9 +41,16 @@ export interface QuoteData {
   discount?: number;
 }
 
-// Nova interface para o Histórico
 export interface SavedQuote extends QuoteData {
   id: string; // ID único do registro no banco
   savedAt: number; // Timestamp de quando foi salvo
   totalValue: number;
+}
+
+// NOVA INTERFACE PARA O SISTEMA DE LOGIN E ASSINATURA
+export interface UserAccount {
+  email: string;
+  password: string; // Em um app real, isso seria um hash
+  createdAt: string;
+  paymentValidUntil: string; // Data ISO até quando o acesso é permitido
 }
